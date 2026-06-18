@@ -1,0 +1,6 @@
+supabase_config.json
+*.log
+*.db
+*.sqlite
+__pycache__/
+.streamlit/secrets.toml
