@@ -331,10 +331,32 @@ def make_line_chart(metrics, selected_events, hours):
     if not selected_events:
         return None
 
+    # Mostra sempre tutto il range selezionato, anche le ore/minuti senza eventi.
+    # Così "Ultime 24 ore" non sembra fermarsi all'ultimo evento disponibile.
+    now_local = datetime.now(LOCAL_TZ)
+    since_local = now_local - timedelta(hours=hours)
+
+    if hours <= 3:
+        step = timedelta(minutes=1)
+        start_bucket = since_local.replace(second=0, microsecond=0)
+        end_bucket = now_local.replace(second=0, microsecond=0)
+    else:
+        step = timedelta(hours=1)
+        start_bucket = since_local.replace(minute=0, second=0, microsecond=0)
+        end_bucket = now_local.replace(minute=0, second=0, microsecond=0)
+
+    x_values = []
+    cursor = start_bucket
+
+    while cursor <= end_bucket:
+        x_values.append(cursor)
+        cursor += step
+
     buckets = defaultdict(Counter)
 
     for r in metrics:
         et = r.get("event_type")
+
         if et not in selected_events:
             continue
 
@@ -345,23 +367,27 @@ def make_line_chart(metrics, selected_events, hours):
         bucket = floor_bucket(dt, hours)
         buckets[bucket][et] += int(r.get("count") or 0)
 
-    if not buckets:
-        return None
-
-    x_values = sorted(buckets.keys())
     fig = go.Figure()
+    has_data = False
+
+    mode = "lines" if len(x_values) > 60 else "lines+markers"
 
     for et in selected_events:
         y_values = [buckets[x].get(et, 0) for x in x_values]
-        if sum(y_values) == 0:
-            continue
+
+        if sum(y_values) > 0:
+            has_data = True
 
         fig.add_trace(go.Scatter(
             x=x_values,
             y=y_values,
-            mode="lines+markers",
+            mode=mode,
             name=label_for_event(et)
         ))
+
+    if not has_data:
+        # Mostro comunque il range temporale, ma senza linee inutili.
+        return None
 
     fig.update_layout(
         title="Eventi online per periodo — ora italiana",
@@ -370,6 +396,9 @@ def make_line_chart(metrics, selected_events, hours):
         xaxis_title="Ora italiana",
         yaxis_title="Conteggio",
         legend_title="Evento",
+        xaxis=dict(
+            range=[start_bucket, end_bucket]
+        )
     )
 
     return fig
@@ -610,6 +639,7 @@ render_table(
 )
 
 st.subheader("📈 Andamento eventi online")
+st.caption("Il grafico mostra anche le ore senza eventi, così il range Ultime 24 ore / 7 giorni è completo. Orario Europe/Rome.")
 
 fig_line = make_line_chart(metrics, selected_graph_events, hours)
 
