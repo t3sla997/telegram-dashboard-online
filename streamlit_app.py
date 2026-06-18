@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from collections import Counter, defaultdict
 from html import escape
 
@@ -10,6 +11,8 @@ import streamlit.components.v1 as components
 import plotly.graph_objects as go
 import requests
 
+
+LOCAL_TZ = ZoneInfo("Europe/Rome")
 
 st.set_page_config(
     page_title="Traffico Telegram Online",
@@ -103,7 +106,7 @@ def parse_ts(ts):
     if not ts:
         return None
     try:
-        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).astimezone(timezone.utc)
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).astimezone(LOCAL_TZ)
     except Exception:
         return None
 
@@ -139,7 +142,17 @@ def sb_get(table, params=None, timeout=60):
 def short_value(v, max_len=160):
     if v is None:
         return ""
-    s = str(v)
+
+    # Converte timestamp Supabase/UTC in ora italiana per le tabelle.
+    if isinstance(v, str) and "T" in v and ("+00:00" in v or v.endswith("Z")):
+        dt = parse_ts(v)
+        if dt:
+            s = dt.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            s = str(v)
+    else:
+        s = str(v)
+
     if len(s) > max_len:
         return s[:max_len] + "..."
     return s
@@ -351,10 +364,10 @@ def make_line_chart(metrics, selected_events, hours):
         ))
 
     fig.update_layout(
-        title="Eventi online per periodo",
+        title="Eventi online per periodo — ora italiana",
         height=430,
         margin=dict(l=20, r=20, t=55, b=20),
-        xaxis_title="Tempo",
+        xaxis_title="Ora italiana",
         yaxis_title="Conteggio",
         legend_title="Evento",
     )
@@ -463,6 +476,7 @@ def make_event_distribution_chart(metric_counts):
 # ============================================================
 
 st.title("🌐 Traffico Telegram Online")
+st.caption("Gli orari sono convertiti in Europe/Rome / ora italiana.")
 
 with st.sidebar:
     st.header("Filtri")
