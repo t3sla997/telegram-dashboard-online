@@ -139,6 +139,41 @@ def sb_get(table, params=None, timeout=60):
     return r.json()
 
 
+def sb_get_all(table, params=None, page_size=1000, max_rows=200000, timeout=90):
+    """
+    Legge Supabase a pagine.
+    Serve perché con 24h/7 giorni una sola query con limit=10000 può tagliare gli eventi più recenti.
+    """
+    all_rows = []
+    offset = 0
+
+    while True:
+        page_params = dict(params or {})
+        page_params["limit"] = str(page_size)
+        page_params["offset"] = str(offset)
+
+        batch = sb_get(
+            table,
+            params=page_params,
+            timeout=timeout
+        )
+
+        if not batch:
+            break
+
+        all_rows.extend(batch)
+
+        if len(batch) < page_size:
+            break
+
+        offset += page_size
+
+        if len(all_rows) >= max_rows:
+            break
+
+    return all_rows
+
+
 def short_value(v, max_len=160):
     if v is None:
         return ""
@@ -267,43 +302,48 @@ def load_data(hours):
     now = datetime.now(timezone.utc)
     since = now - timedelta(hours=hours)
 
-    metrics = sb_get(
+    # Lettura paginata: evita che 24h/7 giorni taglino i dati più recenti.
+    metrics = sb_get_all(
         "metrics_minute",
         params={
             "select": "*",
             "minute": f"gte.{iso(since)}",
-            "order": "minute.asc",
-            "limit": "10000"
-        }
+            "order": "minute.asc"
+        },
+        page_size=1000,
+        max_rows=200000
     )
 
-    groups = sb_get(
+    groups = sb_get_all(
         "group_metrics",
         params={
             "select": "*",
             "minute": f"gte.{iso(since)}",
-            "order": "minute.desc",
-            "limit": "10000"
-        }
+            "order": "minute.asc"
+        },
+        page_size=1000,
+        max_rows=200000
     )
 
-    accounts = sb_get(
+    accounts = sb_get_all(
         "account_status",
         params={
             "select": "*",
-            "order": "updated_at.desc",
-            "limit": "300"
-        }
+            "order": "updated_at.desc"
+        },
+        page_size=1000,
+        max_rows=5000
     )
 
-    errors = sb_get(
+    errors = sb_get_all(
         "recent_errors",
         params={
             "select": "*",
             "ts": f"gte.{iso(since)}",
-            "order": "ts.desc",
-            "limit": "300"
-        }
+            "order": "ts.desc"
+        },
+        page_size=1000,
+        max_rows=10000
     )
 
     return metrics, groups, accounts, errors
@@ -540,6 +580,11 @@ try:
 except Exception as e:
     st.error(f"Errore caricamento dati da Supabase: {type(e).__name__}: {e}")
     st.stop()
+
+st.caption(
+    f"Righe caricate da Supabase — metrics: {len(metrics)} | groups: {len(groups)} | "
+    f"accounts: {len(accounts)} | errors: {len(errors)}"
+)
 
 all_accounts = sorted({a.get("account") for a in accounts if a.get("account")})
 
